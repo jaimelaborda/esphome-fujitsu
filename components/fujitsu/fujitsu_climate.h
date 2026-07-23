@@ -38,6 +38,10 @@ class FujitsuClimate : public climate::Climate, public uart::UARTDevice, public 
   void set_log_raw_frames(bool value) { log_raw_frames_ = value; }
   void set_outdoor_temperature_sensor(sensor::Sensor *sensor) { outdoor_sensor_ = sensor; }
 
+  // True once the handshake with the AC is complete and it is actively polling.
+  // Handy for driving a status LED (see example.yaml).
+  bool is_ac_connected() const { return protocol_.is_running(); }
+
  protected:
   // Adapts the ESPHome UART to the protocol core's ByteIO interface.
   class UartIO : public faircon::ByteIO {
