@@ -11,11 +11,13 @@ esp8266:
 # Free hardware UART0 (GPIO1/GPIO3) for the AC bus; logs go over the network.
 logger:
   baud_rate: 0
+  level: INFO        # default is DEBUG; INFO keeps the log quiet in normal use
 
 uart:
   id: fujitsu_uart
-  # 9600 8N1, inverted signalling (see README). If you only ever see
-  # "invalid checksum" in the log, set both inverted: to false.
+  # 9600 8N1. `inverted:` depends on your interface hardware - if you only ever
+  # see "invalid checksum" in the log, flip both to the opposite value.
+  # If GPIO3 is unusable, use hardware UART0 swapped: tx GPIO15 / rx GPIO13.
   tx_pin:
     number: GPIO1
     inverted: true
@@ -35,6 +37,7 @@ external_components:
 
 climate:
   - platform: fujitsu
+    id: fujitsu_ac
     name: "Fujitsu AC"
     uart_id: fujitsu_uart
     horizontal_swing: true
@@ -60,3 +63,36 @@ wifi:
     password: !secret ap_password
 
 captive_portal:
+
+# Optional: onboard blue LED (GPIO2 / D4, active-low) as a combined status light:
+#   fast blink (5 Hz) -> WiFi/API not connected
+#   slow blink (1 Hz) -> online but not talking to the AC yet
+#   heartbeat (brief flash / 2 s) -> all good (online + AC link running)
+output:
+  - platform: gpio
+    id: status_led_out
+    pin:
+      number: GPIO2
+      inverted: true
+
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          bool net_ok = wifi::global_wifi_component->is_connected() &&
+                        api::global_api_server->is_connected();
+          bool ac_ok = id(fujitsu_ac)->is_ac_connected();
+          uint32_t t = millis();
+          bool on;
+          if (!net_ok) {
+            on = (t % 200) < 100;    // fast blink: no WiFi/API
+          } else if (!ac_ok) {
+            on = (t % 1000) < 500;   // slow blink: AC link down
+          } else {
+            on = (t % 2000) < 80;    // heartbeat: all good
+          }
+          if (on) {
+            id(status_led_out).turn_on();
+          } else {
+            id(status_led_out).turn_off();
+          }
