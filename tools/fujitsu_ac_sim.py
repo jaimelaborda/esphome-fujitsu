@@ -112,6 +112,11 @@ def hexs(data: bytes) -> str:
     return " ".join(f"{b:02X}" for b in data)
 
 
+def _stamp() -> str:
+    t = time.time()
+    return time.strftime("%H:%M:%S", time.localtime(t)) + f".{int((t % 1) * 1000):03d}"
+
+
 def name(addr: int) -> str:
     return REG_NAMES.get(addr, f"0x{addr:04X}")
 
@@ -137,30 +142,41 @@ class FujitsuAcSim:
         self.regs = dict(DEFAULT_REGS)
         self.transport = transport  # object with .write(bytes); None for selftest capture
         self.verbose = verbose
+        self.reads_since_init1 = 0
+        self.handshake_start = None
 
     def send(self, frame: bytes, note=""):
         if self.transport is not None:
             self.transport.write(frame)
-        print(f"  [TX] {hexs(frame)}   {note}")
+        print(f"{_stamp()}  [TX] {hexs(frame)}   {note}")
 
     def handle_frame(self, frame: bytes):
         if not frame_valid(frame):
-            print(f"  [RX] {hexs(frame)}   !! bad checksum, ignored")
+            print(f"{_stamp()}  [RX] {hexs(frame)}   !! bad checksum, ignored")
             return
         t = frame[0]
         if t == 0x00:
-            print(f"  [RX] {hexs(frame)}   init1")
+            # Going back to init1 after we'd started reading registers means the
+            # dongle reset its whole state machine -> the ESP8266 rebooted.
+            if self.reads_since_init1 > 0 and self.handshake_start is not None:
+                elapsed = time.time() - self.handshake_start
+                print(f"  *** DONGLE RESTARTED after {elapsed:.1f}s "
+                      f"({self.reads_since_init1} reads, then back to init1 = it REBOOTED mid-handshake) ***")
+            self.reads_since_init1 = 0
+            self.handshake_start = time.time()
+            print(f"{_stamp()}  [RX] {hexs(frame)}   init1")
             self.send(with_checksum(bytearray([0x00, 0, 0, 0, 0x01, 0x01])), "init1 ack")
         elif t == 0x01:
-            print(f"  [RX] {hexs(frame)}   init2")
+            print(f"{_stamp()}  [RX] {hexs(frame)}   init2")
             self.send(with_checksum(bytearray([0x01, 0, 0, 0, 0x01, 0x01])), "init2 ack")
             print("  --- handshake complete, dongle should now show 'Running' ---")
         elif t == 0x02:
             self._apply_write(frame)
         elif t == 0x03:
+            self.reads_since_init1 += 1
             self._respond_read(frame)
         else:
-            print(f"  [RX] {hexs(frame)}   ?? unknown type 0x{t:02X}")
+            print(f"{_stamp()}  [RX] {hexs(frame)}   ?? unknown type 0x{t:02X}")
 
     def _apply_write(self, frame: bytes):
         count = frame[4] // 4
@@ -171,7 +187,7 @@ class FujitsuAcSim:
             val = (frame[idx + 2] << 8) | frame[idx + 3]
             self.regs[addr] = val
             changes.append(f"{name(addr)}={decode_value(addr, val)}")
-        print(f"  [RX] {hexs(frame)}   WRITE: {', '.join(changes)}")
+        print(f"{_stamp()}  [RX] {hexs(frame)}   WRITE: {', '.join(changes)}")
         self.send(with_checksum(bytearray([0x02, 0, 0, 0, 0x01, 0x01])), "write ack")
 
     def _respond_read(self, frame: bytes):
@@ -181,7 +197,7 @@ class FujitsuAcSim:
         for addr in addrs:
             val = self.regs.get(addr, 0x0000)
             body += bytes([(addr >> 8) & 0xFF, addr & 0xFF, (val >> 8) & 0xFF, val & 0xFF])
-        print(f"  [RX] {hexs(frame)}   read {count} regs")
+        print(f"{_stamp()}  [RX] {hexs(frame)}   read {count} regs")
         self.send(with_checksum(body), f"{count} values")
 
     # -- interactive state helpers --------------------------------------------
