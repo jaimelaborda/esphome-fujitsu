@@ -10,15 +10,24 @@ namespace fujitsu {
 static const char *const TAG = "fujitsu";
 
 // ---------------------------------------------------------------------------
-// Some ESPHome versions expose ClimateTraits::set_supports_current_temperature()
-// and some (2026+) inferred it and removed the setter. Call it only if present.
-// ---------------------------------------------------------------------------
+// Declaring current-temperature support changed across ESPHome versions:
+// newer builds use ClimateTraits::add_feature_flags(...) and deprecated (then
+// removed) set_supports_current_temperature(bool). Prefer the new API when it
+// exists, fall back to the old setter otherwise, and no-op if neither is present
+// -- so this compiles warning-free on every version. Bit 0 of the feature flags
+// is CLIMATE_SUPPORTS_CURRENT_TEMPERATURE; the literal avoids depending on a
+// symbol that doesn't exist on older builds.
 template<typename T>
 static auto enable_current_temperature(T &traits, int)
+    -> decltype(traits.add_feature_flags(1u), void()) {
+  traits.add_feature_flags(1u);  // CLIMATE_SUPPORTS_CURRENT_TEMPERATURE
+}
+template<typename T>
+static auto enable_current_temperature(T &traits, long)
     -> decltype(traits.set_supports_current_temperature(true), void()) {
   traits.set_supports_current_temperature(true);
 }
-template<typename T> static void enable_current_temperature(T &, long) {}
+template<typename T> static void enable_current_temperature(T &, ...) {}
 
 // ---------------------------------------------------------------------------
 // Enum mapping helpers.
