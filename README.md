@@ -172,6 +172,29 @@ c++ -std=c++17 test/test_protocol.cpp components/fujitsu/fujitsu_protocol.cpp -o
 ./fujitsu_tests
 ```
 
+## Testing against a PC simulator
+
+[`tools/fujitsu_ac_sim.py`](tools/fujitsu_ac_sim.py) makes a PC pretend to be the
+AC, so you can validate the dongle firmware (and that the ESP's UART pins work)
+over a safe 3.3 V link — no real AC, no 12 V bus. It answers the handshake, serves
+a realistic AC state, and applies writes so Home Assistant commands round-trip.
+
+Wire a **3.3 V** USB-UART TTL adapter to the ESP (crossed: adapter TX→ESP RX,
+adapter RX→ESP TX, common GND), flash the ESP with non-inverted UART
+(`inverted: false`, 9600 8N1), then:
+
+```sh
+pip install pyserial
+python tools/fujitsu_ac_sim.py --list        # find your COM port
+python tools/fujitsu_ac_sim.py --port COM5   # run the simulator
+python tools/fujitsu_ac_sim.py --selftest    # verify the logic without hardware
+```
+
+If the ESP reaches `Status: Running` against the simulator, the firmware and the
+ESP's serial pins are good, and any remaining problem is the physical AC interface.
+The simulator accepts interactive commands (`show`, `power off`, `temp 21.5`, …) to
+change the simulated state and watch it appear in Home Assistant.
+
 ## Troubleshooting
 
 - **Only `invalid checksum` / no valid frames, never `Running`** → wrong signal
